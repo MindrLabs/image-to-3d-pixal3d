@@ -73,7 +73,7 @@ The result is one GLB file (about 1 million faces, 4096×4096 texture, 35–45MB
 
 Each input was generated once (seed 7; only The Bedroom chair twice). One author confirmed the verdicts.
 
-1. On an RTX 4090, one 3D took a median of 115 s (83–200 s) and about 19.4GiB of GPU memory. Getting there required turning on `low_vram`, which keeps the stage models in system RAM, and then RAM use was about 59GiB. On a 64GB PC, each server start made at most 3 models and then stopped for lack of memory ([Section 2](#2-does-it-run-on-my-machine)).
+1. On an RTX 4090, one 3D took a median of 115 s (83–200 s) and about 19.4GiB of GPU memory. Getting there required turning on `low_vram`, which keeps the stage models in system RAM, and then RAM use peaked at about 59GiB. That peak is almost exactly the RAM cap we set on the 64GB PC (59GiB), so each server start made at most 3 models before the worker process hit the cap and was terminated. RAM did not keep growing with each generation ([Section 2](#2-does-it-run-on-my-machine)).
 2. With `low_vram` off, at generation resolution 1536 (default) GPU memory was already at 22.45GiB just before generation, and at both 1536 and 1024 generation failed with GPU out-of-memory as soon as it started ([Section 2](#2-does-it-run-on-my-machine)).
 3. All 11 paintings produced a 3D mesh, and except for one milk jug hidden by a hand, each was a continuous solid when rotated. Of the 4 judged on shape, 2 had the same silhouette as the painting, and 2 had the overall outline right but lost some parts or were torn on the sides and back ([3.1](#31-one-picture--3d)).
 4. Every result sat in the painting's own viewpoint, tilt and placement. So the painting's perspective distortions also became shape. Van Gogh's chair leans sharply when seen from the side ([3.2](#32-in-the-paintings-own-viewpoint)).
@@ -88,7 +88,7 @@ Table 1: Summary by device
 | Device | Runs? | One 3D | Peak memory |
 |---|---|---|---|
 | Apple M2 16GB | The official code does not (CUDA-only). A third-party 8-bit port ran one picture | About 34 min (1 picture, incl. 8 min background removal) | Not measured (swap +3.3GB) |
-| RTX 4090 24GB (64GB RAM) | Runs with `low_vram` on, but stops after at most 3 per server for lack of RAM | 115 s (median) | GPU 19.4GiB, system RAM about 59GiB |
+| RTX 4090 24GB (64GB RAM) | Runs with `low_vram` on. Peak RAM is close to our 59GiB cap, so each server hit the cap after at most 3 | 115 s (median) | GPU 19.4GiB, system RAM about 59GiB |
 | DGX Spark (GB10, 128GB unified memory) | Runs with a matching CUDA toolkit and Triton (built with CUDA 12.9, Triton 3.5.1). Also runs with `low_vram` off at resolution 1536 | 169–420 s (`low_vram` on, 1024), 255–305 s (off, 1536) | Whole device about 47GiB (`low_vram` off). With it on, the worker alone 89.6GiB |
 
 The memory column measures different things per device, so the numbers cannot be compared directly: GPU memory and the measured process group's RAM on the 4090, whole-device usage (`free`) and the worker's RSS on the DGX Spark, and swap growth on the Mac.
@@ -128,9 +128,9 @@ Table 2: Devices and methods
 
 With `low_vram` on, the stage models stay in system RAM and only the stage that is needed moves to the GPU. GPU use dropped to 19.4GiB, but system RAM use was about 59GiB instead. This 4090 PC had 61.9GiB of RAM. The first time we ran it without a cap, RAM and swap ran out and remote access was lost for 10 minutes. After that we put a cap (59GiB) on the measured processes, so that going over it stopped only the measurement.
 
-![System RAM used by Pixal3D on the 4090 over time. Each server start fills it to 59GiB over about 7 minutes, then after a few generations it hits the cap and is cut off, again and again](docs/images/en/ram-4090.png)
+![RAM used by one Pixal3D server on the 4090. It climbs to 42.5GiB during model loading, reaches the 59GiB cap during the second generation, and stays there through four more generations](docs/images/en/ram-4090.png)
 
-Figure 2 (4090): System RAM used by Pixal3D. After a server start, it fills to near 59GiB within about 7 minutes (this value includes the file cache). On server 4, whose log survives, RAM was 42.5GiB after 5.8 minutes of model loading and reached the cap during the second generation (strip below the chart). In that state it made at most 3 models, then hit the cap and the worker process was terminated. At the moment of termination, the memory the worker process actually held was 58.7GiB. This chart is the run that made 7 of the paintings (sections 3.4 and 3.5); completing those 7 took four server starts.
+Figure 2 (4090): System RAM used by one Pixal3D server (the fourth server of the run that made 7 paintings), including the file cache. It filled to 42.5GiB over 5.8 minutes of model loading and reached our cap (59GiB) during the second generation. After that it did not grow over four more generations. In the same run, on servers 1–3 the worker process was terminated when a generation briefly pushed past the cap (at most 3 per server); at that moment the worker process held 58.7GiB. Completing the 7 paintings (sections 3.4 and 3.5) took four server starts.
 
 Table 3: RTX 4090, generation time and output size per painting (input read size 512, seed 7)
 
@@ -201,7 +201,7 @@ Table 4: DGX Spark and RTX 4090 with the same settings (`low_vram` on, generatio
 - **Reading the input at 1024, which hit the RAM cap on the 4090, ran on the DGX Spark.** It took 5–7% longer than at 512, and face counts were nearly the same.
 - **Peak GPU memory was 17.7–18.0GiB, but on unified memory this number does not show how much memory the job holds.** It is the GPU memory nvidia-smi reports for the server's processes (the whole-device value reads [N/A] on GB10). With `low_vram` off at 1536 (below) it was also 17.7–17.8GiB, while the whole device used about 47GiB.
 
-**On unified memory, `low_vram` appeared to use more memory, not less.** With `low_vram` on, the worker process's resident memory (RSS) was 89.6GiB after the warmup and the first generation. With it off at 1536, memory use for the whole device was about 47GiB, and three 3D models were made in a row on one server start. With `low_vram` on, the first server start hit the 100GiB cap we set on the next generation and the worker was killed for lack of memory. The next two server starts each made six generations in a row (warmups included) without hitting the cap. The two numbers are not the same measure: 89.6GiB is the worker's RSS, which can include weight-file pages mapped into memory, and 47GiB is whole-device usage from `free` at one moment during generation.
+**On unified memory, `low_vram` appeared to use more memory, not less.** With `low_vram` on, the worker process's resident memory (RSS) was 89.6GiB after the warmup and the first generation. With it off at 1536, memory use for the whole device was about 47GiB, and three 3D models were made in a row on one server start. With `low_vram` on, the first server start briefly went over the 100GiB cap we set during the next generation, and the worker process was terminated. The next two server starts each made six generations in a row (warmups included) without hitting the cap. The two numbers are not the same measure: 89.6GiB is the worker's RSS, which can include weight-file pages mapped into memory, and 47GiB is whole-device usage from `free` at one moment during generation.
 
 **`low_vram` off at generation resolution 1536 (the upstream default) also ran on the DGX Spark.** The 4090 could not run this setting. We remade three paintings with seed 7.
 
@@ -308,7 +308,7 @@ Figure 7 (DGX Spark): The Vermeer milk jug cut wider. From left, input, front, 3
 
 ## 4 Recommendations
 
-- On a 24GB GPU, start with `low_vram: true` and `resolution: 1024`. With 64GB of system RAM, close other large programs, and when the server stops after making a few, start it again. We expect 96GB of RAM or more to leave headroom, but did not measure it.
+- On a 24GB GPU, start with `low_vram: true` and `resolution: 1024`. With 64GB of system RAM, close other large programs, and when the worker process is terminated at the RAM cap, start the server again. We expect 96GB of RAM or more to leave headroom, but did not measure it.
 - On a DGX Spark (128GB unified memory), set `low_vram: false`. With it on, the worker grew to 89.6GiB and was killed once at our 100GiB cap. With it off at 1536, the whole device used about 47GiB. Getting it to run needs the CUDA toolkit and Triton setup in section 2.
 - Start the server once and process several pictures in a row. Model loading takes 5–6.5 minutes, about three times the time to make one 3D (about 2 minutes).
 - Remove the background beforehand so only the object is left. With the background in, the floor or background stuck on as a slab in 5 of 7.
@@ -330,14 +330,14 @@ These are effects seen repeatedly across results, and hypotheses we could not co
 | Effect | Where seen | Unconfirmed hypothesis |
 |---|---|---|
 | Floor or background stuck on as a slab | Watering can, roses, milk jug, figure's head | Does it stick in the same place with a different seed (is it decided by the floor in the painting)? |
-| Holes and tears in side and back surfaces | Shoes, figure's head, chair | Do they shrink if the input is read at 1024 (the 4090 ran out of RAM; the DGX Spark made the chair and skull at 1024, but this report does not compare their surfaces)? |
+| Holes and tears in side and back surfaces | Shoes, figure's head, chair | Do they shrink if the input is read at 1024 (the 4090 hit the RAM cap; the DGX Spark made the chair and skull at 1024, but this report does not compare their surfaces)? |
 | Teal stains not in the painting | Chair, shoes | Is this the painting's wall or floor color bleeding? |
 | Back is a simple dark lump | Basket of apples, figure's head | |
 | Face cut at the painting's edge left flat | Heda pewter jug, figure's head | Is it decided by the painting's border? |
 | Scattered thin fragments | Floor of the Heda still life | |
 
 - Each input was generated once with one seed (7). The Bedroom chair, made twice with the same seed, gave GLBs of slightly different size (35.8MB and 35.7MB), but we did not compare how much the shapes differ. We did not measure how much results vary with the seed either.
-- We did not make GLBs with reduced face count and texture size (for games and the web). The 4090 made at most 3 per server start, so we spent the time on adding more paintings.
+- We did not make GLBs with reduced face count and texture size (for games and the web). On the 4090 the RAM cap allowed at most 3 per server start, so we spent the time on adding more paintings.
 - We put in no real photos. Every input is an oil painting.
 - We did not test multi-view input (the feature that takes photos from several angles together), because it needs camera poses.
 - We did not re-measure the paper's numbers (IoU on Toys4K and others), and did not compare with other image-to-3D models.
