@@ -57,7 +57,7 @@ Once the model loads, a web UI opens at `http://localhost:8104`. Upload a pictur
 
 The first start takes a long time, because it builds CUDA extensions (nvdiffrast, CuMesh and others) and downloads the weights. On the 4090 it took about 30 minutes, so the config sets `start_timeout: 2h`. On the DGX Spark, building flash-attn and natten from source alone took about 73 minutes.
 
-**Memory.** This config uses `low_vram: true` and `resolution: 1024`. A 24GB GPU needs these settings, and in exchange they use about 59GiB of system RAM. On a 64GB RAM PC, keep almost nothing else running (Section 2). On the DGX Spark's unified memory, `low_vram` appeared to use more memory, not less, so turn it off there.
+**Memory.** This config uses `low_vram: true` (a mode that keeps the stage models in system RAM) and `resolution: 1024`. A 24GB GPU needed `low_vram` (with it off, both 1536 and 1024 ran out of GPU memory). In exchange it uses a lot of system RAM (in our runs it filled the 59GiB cap). We did not test 1536 with `low_vram` on. On a 64GB RAM PC, keep almost nothing else running (Section 2). On the DGX Spark's unified memory, `low_vram` appeared to use more memory, not less, so turn it off there.
 
 Example request:
 
@@ -73,12 +73,12 @@ The result is one GLB file (about 1 million faces, 4096×4096 texture, 35–45MB
 
 Each input was generated once (seed 7; only The Bedroom chair twice). One author confirmed the verdicts.
 
-1. On an RTX 4090, one 3D took a median of 115 s (83–200 s) and about 19.4GiB of GPU memory. Getting there required turning on `low_vram`, which keeps the stage models in system RAM, and then RAM use peaked at about 59GiB. That peak is almost exactly the RAM cap we set on the 64GB PC (59GiB), so each server start made at most 3 models before the worker process hit the cap and was terminated. RAM did not keep growing with each generation ([Section 2](#2-does-it-run-on-my-machine)).
+1. On an RTX 4090, one 3D took a median of 115 s (12 runs, 83–200 s) and about 19.4GiB of GPU memory. Getting there required turning on `low_vram`, which keeps the stage models in system RAM, and then RAM filled up to the cap we set on the 64GB PC (59GiB). Each server start left at most 3 results before the worker process was usually terminated at the cap, but RAM did not keep growing with each generation ([Section 2](#2-does-it-run-on-my-machine)).
 2. With `low_vram` off, at generation resolution 1536 (default) GPU memory was already at 22.45GiB just before generation, and at both 1536 and 1024 generation failed with GPU out-of-memory as soon as it started ([Section 2](#2-does-it-run-on-my-machine)).
 3. All 11 paintings produced a 3D mesh, and except for one milk jug hidden by a hand, each was a continuous solid when rotated. Of the 4 judged on shape, 2 had the same silhouette as the painting, and 2 had the overall outline right but lost some parts or were torn on the sides and back ([3.1](#31-one-picture--3d)).
-4. Every result sat in the painting's own viewpoint, tilt and placement. So the painting's perspective distortions also became shape. Van Gogh's chair leans sharply when seen from the side ([3.2](#32-in-the-paintings-own-viewpoint)).
+4. All 3 results judged for viewpoint sat in the painting's own viewpoint, tilt and placement. So the painting's perspective distortions also became shape. Van Gogh's chair leans sharply when seen from the side ([3.2](#32-in-the-paintings-own-viewpoint)).
 5. The unpainted back continued plausibly on the chair, the shoes and the basket, but was sometimes filled simply, with a smooth dark hemisphere or a rough lump. On the skull, the glass attached behind it was mashed ([3.3](#33-the-unpainted-back)).
-6. In 5 of the 7 paintings whose background we did not remove, the floor, table or background became a flat slab attached to the object. No object itself was cut away ([3.4](#34-automatic-background-removal)).
+6. In 5 of the 7 judged for background removal, the floor, table or background became a flat slab attached to the object. No object itself was cut away ([3.4](#34-automatic-background-removal)).
 7. The milk jug hidden by a hand became not a solid but a relief, with the whole picture raised like a slab. Cropped wider so its outline shows, it got a round body and a back, but the hands holding it stuck on as one lump. Seurat's watering can, cropped at the painting's edge, was built out including the cropped spout ([3.5](#35-cropped-or-hidden-objects-and-faces)).
 8. The official code does not run on an Apple M2 16GB, but a third-party 8-bit port made The Bedroom chair in about 34 minutes. Comparing the four-angle renders without judging, its shape was nearly the same as the 4090 result ([section 2](#a-16-gb-mac-runs-it-as-an-8-bit-port)).
 9. A DGX Spark (GB10, 128GB unified memory) ran the official code after we matched the CUDA toolkit and Triton to the GB10 GPU. With the same settings as the 4090, the chair took 169 s (4090: 143 s) and the skull 392 s (4090: 136 s). With `low_vram` on, the worker grew to 89.6GiB; with it off, at generation resolution 1536 (default), the whole device used about 47GiB and made three in a row on one server start ([section 2](#a-dgx-spark-runs-it-with-a-matching-cuda-toolkit-and-triton)).
@@ -88,7 +88,7 @@ Table 1: Summary by device
 | Device | Runs? | One 3D | Peak memory |
 |---|---|---|---|
 | Apple M2 16GB | The official code does not (CUDA-only). A third-party 8-bit port ran one picture | About 34 min (1 picture, incl. 8 min background removal) | Not measured (swap +3.3GB) |
-| RTX 4090 24GB (64GB RAM) | Runs with `low_vram` on. Peak RAM is close to our 59GiB cap, so each server hit the cap after at most 3 | 115 s (median) | GPU 19.4GiB, system RAM about 59GiB |
+| RTX 4090 24GB (64GB RAM) | Runs with `low_vram` on. RAM fills our 59GiB cap, so each server hit the cap after at most 3 results | 115 s (median) | GPU 19.4GiB, system RAM up to the 59GiB cap |
 | DGX Spark (GB10, 128GB unified memory) | Runs with a matching CUDA toolkit and Triton (built with CUDA 12.9, Triton 3.5.1). Also runs with `low_vram` off at resolution 1536 | 169–420 s (`low_vram` on, 1024), 255–305 s (off, 1536) | Whole device about 47GiB (`low_vram` off). With it on, the worker alone 89.6GiB |
 
 The memory column measures different things per device, so the numbers cannot be compared directly: GPU memory and the measured process group's RAM on the 4090, whole-device usage (`free`) and the worker's RSS on the DGX Spark, and swap growth on the Mac.
@@ -101,10 +101,10 @@ Table 2: Devices and methods
 |---|---|---|
 | RTX 4090 (24GB, 61.9GiB system RAM, shared) | model-compose 0.4.113 server (`low_vram: true`, `resolution: 1024`), when nothing else was running | GPU memory nvidia-smi reports for the server's processes; system RAM is the usage of the measured process group (cgroup) |
 | Apple M2 (16GB, macOS 26.5) | The Metal binary of the third-party port [pixal3d.cpp](https://github.com/raven38/pixal3d.cpp) (release `showcase-assets-sv-1`) with 8-bit weights. No model-compose | System swap usage (every 2 s) |
-| DGX Spark (GB10, 128GB unified memory, aarch64, system CUDA 13.0) | model-compose 0.4.113 server with the same official compose as the 4090 (`low_vram: true`, `resolution: 1024`), plus a copy with `low_vram: false`, `resolution: 1536`. torch 2.7.1+cu128, CUDA 12.9 toolkit (for building), Triton 3.5.1. 100GiB memory cap on the server (systemd scope) | GPU memory nvidia-smi reports for the server's processes (the whole-device value is [N/A] on GB10) |
+| DGX Spark (GB10, 128GB unified memory, aarch64, system CUDA 13.0) | model-compose 0.4.113 server with the same official compose as the 4090 (`low_vram: true`, `resolution: 1024`), plus a copy with `low_vram: false`, `resolution: 1536`. torch 2.7.1+cu128, CUDA 12.9 toolkit (for building), Triton 3.5.1. 100GiB memory cap on the server (systemd scope) | GPU memory nvidia-smi reports for the server's processes (the whole-device value is [N/A] on GB10). Memory comparisons use whole-device usage (`free`) and the worker's RSS |
 
 - Weights: `TencentARC/Pixal3D` revision `b0cb2e1b`. 12 steps per stage, guidance 7.5 (texture 1.0), input read size 512, face target 1 million, texture 4096 (the defaults of the model-compose example).
-- Times are the generation time of one 3D. The first request after startup (warmup) and model loading (mostly 5–6.5 min on the 4090) are not counted. Only the three DGX Spark runs with `low_vram` off had no warmup (Section 2).
+- Times are the generation time of one 3D. Warmup after startup (repeated 2–5 times until generation time settles) and model loading (mostly 5–6.5 min on the 4090) are not counted. Only the three DGX Spark runs with `low_vram` off had no warmup (Section 2).
 - On the 4090 we put a 59GiB RAM cap on the whole measured process group, because without a cap RAM once ran out and the whole machine froze (Section 2). On the DGX Spark the cap was 100GiB.
 - The 11 inputs are objects cut from the 9 paintings below and resized to 1024px (two paintings gave two objects each). Backgrounds were not removed. All are images museums have released into the public domain (CC0 or a public-domain mark).
 
@@ -126,11 +126,11 @@ Table 2: Devices and methods
 
 **On an RTX 4090 (24GB) it runs only with `low_vram` on.** With `low_vram` off, all of the model's stages go onto the GPU. At generation resolution 1536 (default), 22.45GiB was already in use when generation started, so it could not allocate another 512MB and failed. Lowering the resolution to 1024, it still could not allocate another 1GiB and failed.
 
-With `low_vram` on, the stage models stay in system RAM and only the stage that is needed moves to the GPU. GPU use dropped to 19.4GiB, but system RAM use was about 59GiB instead. This 4090 PC had 61.9GiB of RAM. The first time we ran it without a cap, RAM and swap ran out and remote access was lost for 10 minutes. After that we put a cap (59GiB) on the measured processes, so that going over it stopped only the measurement.
+With `low_vram` on, the stage models stay in system RAM and only the stage that is needed moves to the GPU. GPU use dropped to 19.4GiB, but system RAM filled up to the cap we set (59GiB) instead. At termination the worker process itself held 58.7GiB, and because of the cap we cannot tell how much it actually needs. This 4090 PC had 61.9GiB of RAM. The first time we ran it without a cap, RAM and swap ran out and remote access was lost for 10 minutes. After that we put a cap (59GiB) on the measured processes, so that going over it terminated only that process and the machine kept running.
 
 ![RAM used by one Pixal3D server on the 4090. It climbs to 42.5GiB during model loading, reaches the 59GiB cap during the second generation, and stays there through four more generations](docs/images/en/ram-4090.png)
 
-Figure 2 (4090): System RAM used by one Pixal3D server (the fourth server of the run that made 7 paintings), including the file cache. It filled to 42.5GiB over 5.8 minutes of model loading and reached our cap (59GiB) during the second generation. After that it did not grow over four more generations. In the same run, on servers 1–3 the worker process was terminated when a generation briefly pushed past the cap (at most 3 per server); at that moment the worker process held 58.7GiB. Completing the 7 paintings (sections 3.4 and 3.5) took four server starts.
+Figure 2 (4090): System RAM used by one Pixal3D server (the fourth server of the run that made 7 paintings), including the file cache. It filled to 42.5GiB over 5.8 minutes of model loading and reached our cap (59GiB) during the second generation. After that it did not grow over four more generations (generations 1–4 are warmups, 5–6 are results). In the same run, on servers 1–3 the worker process was terminated when a generation briefly pushed past the cap (3–6 generations per server including warmups, at most 3 results); at that moment the worker process held 58.7GiB. Completing the 7 paintings (sections 3.4 and 3.5) took four server starts.
 
 Table 3: RTX 4090, generation time and output size per painting (input read size 512, seed 7)
 
@@ -144,7 +144,7 @@ Table 3: RTX 4090, generation time and output size per painting (input read size
 | Vermeer figure's head | 109 s | 988K | 35.1MB |
 | Cézanne basket of apples | 121 s | 967K | 36.7MB |
 | Claesz skull | 136 s | 980K | 41.5MB |
-| The Bedroom chair (2 runs) | 143 s, 151 s | 969K | 35.8MB |
+| The Bedroom chair (2 runs) | 143 s, 151 s | 969K | 35.8MB, 35.7MB |
 | Van Gogh shoes | 156 s | 949K | 43.6MB |
 | Seurat watering can | 200 s | 924K | 40.4MB |
 
@@ -160,7 +160,7 @@ The Bedroom chair was made twice under the same conditions, in the speed and the
 
 Background removal was done by the port's BiRefNet (a GGUF conversion of `ZhengPeng7/BiRefNet`, 0.82GiB), a different model from the 4090's RMBG-2.0. The viewpoint (FOV) was estimated with MoGe-2 as on the 4090 (38.7°), run on the Mac CPU. The port's estimation script stopped on the CPU running in fp16, so in our copy we passed `use_fp16=False` to `model.infer(...)` in `estimate_transforms_moge.py`.
 
-The downloads are the Metal binary (release `trellis-metal-macos-arm64`, 2MB), the 7.54GiB weights, `birefnet.gguf` (0.82GiB) and MoGe-2 (about 1.2GB). The estimation script `tools/run_pixal3d_estimated.py` comes from the repository, and MoGe-2 needs its own Python environment with torch and `moge` (the latest `moge` pulls a CUDA-only dependency, so we installed it with `--no-deps`). With the weights and `birefnet.gguf` in one folder (`<models>`), we ran:
+The downloads are the Metal binary (`trellis-metal-macos-arm64.tar.gz`, 2.6MB; when we downloaded it, it was in the `showcase-assets-sv-1` release, and a file of the same name is now in the `v0.10.x-desktop-alpha` releases), the 7.54GiB weights, `birefnet.gguf` (0.82GiB) and MoGe-2 (about 1.2GB). The estimation script `tools/run_pixal3d_estimated.py` comes from the repository, and MoGe-2 needs its own Python environment with torch and `moge` (the latest `moge` pulls a CUDA-only dependency, so we installed it with `--no-deps`). With the weights and `birefnet.gguf` in one folder (`<models>`), we ran:
 
 ```bash
 ./trellis-cli chair.png cut.glb --bg-only --models <models>        # -> cut_cutout.png
@@ -181,9 +181,9 @@ Figure 3: 3D made from The Bedroom chair. Top row RTX 4090 (official code), bott
 
 ### A DGX Spark runs it with a matching CUDA toolkit and Triton
 
-**On the DGX Spark (NVIDIA GB10, 128GB unified memory, aarch64, system CUDA 13.0), the torch 2.7 that Pixal3D pins does not match the machine's CUDA 13 and GB10 GPU, so it ran only after we set up the CUDA toolkit and Triton.** We ran it with the same model-compose 0.4.113 and official compose as on the 4090, and torch is the same 2.7.1+cu128.
+**On the DGX Spark (NVIDIA GB10, 128GB unified memory, aarch64, system CUDA 13.0), the torch 2.7 (cu128) in this setup does not match the machine's CUDA 13 and GB10 GPU, so it ran only after we set up the CUDA toolkit and Triton.** We ran it with the same model-compose 0.4.113 and official compose as on the 4090, and torch is the same 2.7.1+cu128.
 
-- **Building the CUDA extensions.** Pixal3D pins torch 2.7 (cu128), and with only CUDA 13 on the system the extensions could not be built. We installed a CUDA 12.9 toolkit separately in a user folder. flash-attn and natten had no prebuilt aarch64 wheels we could use, so we built these two from source (about 73 minutes together).
+- **Building the CUDA extensions.** This setup uses torch 2.7 (cu128), and with only CUDA 13 on the system the extensions could not be built. We installed a CUDA 12.9 toolkit separately in a user folder. flash-attn and natten had no prebuilt aarch64 wheels we could use, so we built these two from source (about 73 minutes together).
 - **Triton.** Triton 3.3.1, which comes with torch 2.7, does not know sm_121 (GB10), and the worker died at the texture stage (`LLVM ERROR: Cannot select: intrinsic %llvm.nvvm.cp.async.commit.group`). We upgraded to Triton 3.5.1 and had it use `ptxas` from CUDA 12.9.
 
 The weights (46GB) were already in that machine's cache, so we did not download them.
@@ -201,7 +201,7 @@ Table 4: DGX Spark and RTX 4090 with the same settings (`low_vram` on, generatio
 - **Reading the input at 1024, which hit the RAM cap on the 4090, ran on the DGX Spark.** It took 5–7% longer than at 512, and face counts were nearly the same.
 - **Peak GPU memory was 17.7–18.0GiB, but on unified memory this number does not show how much memory the job holds.** It is the GPU memory nvidia-smi reports for the server's processes (the whole-device value reads [N/A] on GB10). With `low_vram` off at 1536 (below) it was also 17.7–17.8GiB, while the whole device used about 47GiB.
 
-**On unified memory, `low_vram` appeared to use more memory, not less.** With `low_vram` on, the worker process's resident memory (RSS) was 89.6GiB after the warmup and the first generation. With it off at 1536, memory use for the whole device was about 47GiB, and three 3D models were made in a row on one server start. With `low_vram` on, the first server start briefly went over the 100GiB cap we set during the next generation, and the worker process was terminated. The next two server starts each made six generations in a row (warmups included) without hitting the cap. The two numbers are not the same measure: 89.6GiB is the worker's RSS, which can include weight-file pages mapped into memory, and 47GiB is whole-device usage from `free` at one moment during generation.
+**On unified memory, `low_vram` appeared to use more memory, not less.** With `low_vram` on, the worker process's resident memory (RSS) was 89.6GiB after six generations (five warmups and one result). With it off at 1536, memory use for the whole device was about 47GiB, and three 3D models were made in a row on one server start. The two numbers are not the same measure, though: 89.6GiB is the worker's RSS, which can include weight-file pages mapped into memory, and 47GiB is whole-device usage from `free` at one moment during generation. The `low_vram` server briefly went over the 100GiB cap we set during the seventh generation, and the worker process was terminated. The next two server starts each made six generations in a row (warmups included) without hitting the cap.
 
 **`low_vram` off at generation resolution 1536 (the upstream default) also ran on the DGX Spark.** The 4090 could not run this setting. We remade three paintings with seed 7.
 
@@ -230,10 +230,10 @@ Table 6: Questions and results
 | Official claim | Our result |
 |---|---|
 | One image → 3D asset | All 11 produced a 3D mesh. Of the 4 judged on shape, 2 matched down to the silhouette |
-| 3D aligned to the input view | All sat in the painting's own viewpoint. The painting's perspective distortions also became shape |
+| 3D aligned to the input view | All 3 judged sat in the painting's own viewpoint. The painting's perspective distortions also became shape |
 | Near-reconstruction fidelity | The front is very close to the painting. The sides and back showed tears, doubled shapes and simple lumps |
 | Automatic background removal | Did not cut into objects, but in 5 of 7 the floor or background stuck on as a slab |
-| Lower peak VRAM with low-VRAM mode | True (19.4GiB). Uses about 59GiB of system RAM instead (Section 2) |
+| Lower peak VRAM with low-VRAM mode | True (19.4GiB). System RAM filled the 59GiB cap instead (Section 2) |
 
 ### 3.1 One picture → 3D
 
@@ -280,7 +280,7 @@ Table 8: Back verdicts (do shape and color continue from the front?)
 
 > Official GitHub: "Views need not be RGBA — any view without an alpha channel is matted with the same background-removal model `inference.py` uses."
 
-Of the 7 paintings whose background we did not remove, 2 (Manet crystal vase, The Bedroom front chair) were left with only the object, and in 5 the floor or background stuck on as a slab.
+Of the 7 judged for background removal, 2 (Manet crystal vase, The Bedroom front chair) were left with only the object, and in 5 the floor or background stuck on as a slab.
 
 - **What remained most often was the floor the object stands on.** On Van Gogh's roses the green table stuck on under the vase as a slanted slab, and on Seurat's watering can the pink dirt path stuck on as a square base.
 - **No object body was cut away.** The watering can's handle, the chair's rails and even the thin leaves above the vase remained.
@@ -304,14 +304,14 @@ Figure 6 (4090): From left, input, front, side, back. From top, Vermeer milk jug
 
 Figure 7 (DGX Spark): The Vermeer milk jug cut wider. From left, input, front, 3/4, side, back.
 
-**Cutting wider undid the relief, but the hands stuck on.** We cut the same painting again, wider so the jug's whole outline shows (region 1220,2300–2080,3160 of the original). We made it on the DGX Spark with the same settings (`low_vram` on, 1024, seed 7), and it took 305 s (990K faces, 38.2MB). The relief came apart into a round body with a back, but the two hands holding the jug and the blue sleeve became one lump attached to the body. From this one run, the hands covering the jug look like a bigger cause than the crop.
+**Cutting wider undid the relief, but the hands stuck on.** We cut the same painting again, wider so the jug's whole outline shows (region 1220,2300–2080,3160 of the original). We made it on the DGX Spark with the same settings (`low_vram` on, 1024, seed 7), and it took 305 s (990K faces, 38.2MB). The relief came apart into a round body with a back, but the two hands holding the jug and the blue sleeve became one lump attached to the body. The original ran on the 4090 and this one on the DGX Spark, so this is not a crop-only comparison. From this one run, the hands covering the jug look like a bigger cause than the crop.
 
 ## 4 Recommendations
 
-- On a 24GB GPU, start with `low_vram: true` and `resolution: 1024`. With 64GB of system RAM, close other large programs, and when the worker process is terminated at the RAM cap, start the server again. We expect 96GB of RAM or more to leave headroom, but did not measure it.
+- On a 24GB GPU, start with `low_vram: true` and `resolution: 1024`. With 64GB of system RAM, close other large programs. Without a cap RAM can run out and freeze the machine. We put a RAM cap (59GiB) on the server process and restarted the server when the worker process was terminated at the cap. We did not measure how much headroom a PC with more RAM gives.
 - On a DGX Spark (128GB unified memory), set `low_vram: false`. With it on, the worker grew to 89.6GiB and was killed once at our 100GiB cap. With it off at 1536, the whole device used about 47GiB. Getting it to run needs the CUDA toolkit and Triton setup in section 2.
 - Start the server once and process several pictures in a row. Model loading takes 5–6.5 minutes, about three times the time to make one 3D (about 2 minutes).
-- Remove the background beforehand so only the object is left. With the background in, the floor or background stuck on as a slab in 5 of 7.
+- Remove the background beforehand so only the object is left. With the background in, the floor or background stuck on as a slab in 5 of 7 (we did not check whether removing it beforehand makes the slab go away).
 - Avoid pictures where the object is hidden by a hand or another object. The hand or object doing the covering rises as a slab along with it.
 - If you put in a painting or an illustration, check the tilt from the side. The picture's perspective distortions become shape as they are.
 - For assets that will be shown rotating, check the sides and back yourself and fix them. Even when the front matches the picture, the back may be a simple lump.
@@ -321,7 +321,7 @@ Figure 7 (DGX Spark): The Vermeer milk jug cut wider. From left, input, front, 3
 
 ### Main defect: the background sticks on as a slab
 
-In 5 of the 7 paintings put in without removing the background, the floor or table the object stands on, or part of the background, became a flat slab or base attached to the object (the watering can and roses in Figure 5, the milk jug in Figure 6). Using them for 3D printing or as game assets needs a fix that removes the slab. We did not compare against the same paintings with the background removed beforehand, so we did not confirm whether removing it beforehand makes the slab go away.
+In 5 of the 7 judged for background removal, the floor or table the object stands on, or part of the background, became a flat slab or base attached to the object (the watering can and roses in Figure 5, the milk jug in Figure 6). Using them for 3D printing or as game assets needs a fix that removes the slab. We did not compare against the same paintings with the background removed beforehand, so we did not confirm whether removing it beforehand makes the slab go away.
 
 ### Other limits
 
