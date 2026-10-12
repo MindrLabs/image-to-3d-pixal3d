@@ -1,0 +1,56 @@
+controller:
+  adapter:
+    type: http-server
+    port: ${env.PORT | 8103}
+    base_path: /api
+  webui:
+    driver: gradio
+    port: ${env.SERVER_PORT | 8104}
+
+workflows:
+  - id: generate
+    title: Pixal3D Image-to-3D
+    description: Generate a textured GLB mesh from a single image using TencentARC Pixal3D.
+    job:
+      input: ${input}
+      output: ${output as model-3d/glb}
+
+component:
+  type: model
+  task: image-to-3d
+  driver: custom
+  family: pixal3d
+  device: cuda
+  model:
+    provider: huggingface
+    repository: TencentARC/Pixal3D
+  resolution: 1024
+  low_vram: true
+  max_concurrent_count: 1
+  runtime:
+    type: virtualenv
+    driver: python
+    path: .venv/pixal3d
+    start_timeout: 2h
+  action:
+    image: ${input.image as image}
+    seed: ${input.seed as integer}
+    params:
+      manual_fov: ${input.manual_fov as number}
+      mesh_scale: ${input.mesh_scale as number | 1.0}
+      image_resolution: ${input.image_resolution as integer | 512}
+      ss_sampling_steps: ${input.ss_sampling_steps as integer | 12}
+      ss_guidance_strength: ${input.ss_guidance_strength as number | 7.5}
+      ss_guidance_rescale: ${input.ss_guidance_rescale as number | 0.7}
+      ss_rescale_t: ${input.ss_rescale_t as number | 5.0}
+      shape_slat_sampling_steps: ${input.shape_slat_sampling_steps as integer | 12}
+      shape_slat_guidance_strength: ${input.shape_slat_guidance_strength as number | 7.5}
+      shape_slat_guidance_rescale: ${input.shape_slat_guidance_rescale as number | 0.5}
+      shape_slat_rescale_t: ${input.shape_slat_rescale_t as number | 3.0}
+      tex_slat_sampling_steps: ${input.tex_slat_sampling_steps as integer | 12}
+      tex_slat_guidance_strength: ${input.tex_slat_guidance_strength as number | 1.0}
+      tex_slat_guidance_rescale: ${input.tex_slat_guidance_rescale as number | 0.0}
+      tex_slat_rescale_t: ${input.tex_slat_rescale_t as number | 3.0}
+      max_num_tokens: ${input.max_num_tokens as integer | 49152}
+      texture_size: ${input.texture_size as integer | 4096}
+      decimation_target: ${input.decimation_target as integer | 1000000}
